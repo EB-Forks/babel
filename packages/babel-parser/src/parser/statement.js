@@ -1741,7 +1741,12 @@ export default class StatementParser extends ExpressionParser {
 
       this.next();
 
-      specifier.exported = this.parseIdentifier(true);
+      if (this.match(tt.string)) {
+        this.expectPlugin("arbitraryModuleExportNames");
+        specifier.exported = this.parseModuleExportName();
+      } else {
+        specifier.exported = this.parseIdentifier(true);
+      }
       node.specifiers.push(
         this.finishNode(specifier, "ExportNamespaceSpecifier"),
       );
@@ -2038,9 +2043,16 @@ export default class StatementParser extends ExpressionParser {
 
       const node = this.startNode();
       node.local = this.parseIdentifier(true);
-      node.exported = this.eatContextual("as")
-        ? this.parseIdentifier(true)
-        : node.local.__clone();
+      if (this.eatContextual("as")) {
+        if (this.match(tt.string)) {
+          this.expectPlugin("arbitraryModuleExportNames");
+          node.exported = this.parseModuleExportName();
+        } else {
+          node.exported = this.parseIdentifier(true);
+        }
+      } else {
+        node.exported = node.local.__clone();
+      }
       nodes.push(this.finishNode(node, "ExportSpecifier"));
     }
 
@@ -2216,17 +2228,24 @@ export default class StatementParser extends ExpressionParser {
   // https://tc39.es/ecma262/#prod-ImportSpecifier
   parseImportSpecifier(node: N.ImportDeclaration): void {
     const specifier = this.startNode();
-    specifier.imported = this.parseIdentifier(true);
-    if (this.eatContextual("as")) {
+    if (this.match(tt.string)) {
+      this.expectPlugin("arbitraryModuleExportNames");
+      specifier.imported = this.parseModuleExportName();
+      this.expectContextual("as");
       specifier.local = this.parseIdentifier();
     } else {
-      this.checkReservedWord(
-        specifier.imported.name,
-        specifier.start,
-        true,
-        true,
-      );
-      specifier.local = specifier.imported.__clone();
+      specifier.imported = this.parseIdentifier(true);
+      if (this.eatContextual("as")) {
+        specifier.local = this.parseIdentifier();
+      } else {
+        this.checkReservedWord(
+          specifier.imported.name,
+          specifier.start,
+          true,
+          true,
+        );
+        specifier.local = specifier.imported.__clone();
+      }
     }
     this.checkLVal(
       specifier.local,
@@ -2235,5 +2254,10 @@ export default class StatementParser extends ExpressionParser {
       "import specifier",
     );
     node.specifiers.push(this.finishNode(specifier, "ImportSpecifier"));
+  }
+
+  parseModuleExportName() {
+    // TODO: Validate that the string has no unpaired surrogates.
+    return this.parseLiteral(this.state.value, "StringLiteral");
   }
 }
